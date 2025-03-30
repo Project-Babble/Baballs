@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net9.0</TargetFramework>
+		<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+		<PublishAot>true</PublishAot>
+		<PublishSingleFile>true</PublishSingleFile>
+		<PublishTrimmed>true</PublishTrimmed>
+		<SelfContained>true</SelfContained>
+		<UseInterpreter>false</UseInterpreter>
+		<WarningLevel>4</WarningLevel>
+		<Nullable>enable</Nullable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+	</PropertyGroup>
+	<Target Name="ExportScene" Inputs="./assets.blend" Outputs="$(IntermediateOutputPath)assets.glb" BeforeTargets="BeforeBuild">
+		<!-- TODO: clean up export settings -->
+		<!-- TODO: quantize meshes -->
+		<MakeDir Directories="$(IntermediateOutputPath)"/>
+		<Exec Command="blender ./assets.blend -b --factory-startup --python-expr 'import bpy;import sys;bpy.ops.export_scene.gltf(filepath=sys.argv[sys.argv.index(&quot;--&quot;) + 1], check_existing=False, use_mesh_edges=True, use_mesh_vertices=True, export_animations=False, export_apply=True, export_materials=&quot;EXPORT&quot;)' -- $(IntermediateOutputPath)assets.glb" Outputs="$(IntermediateOutputPath)assets.glb">
+			<Output TaskParameter="Outputs" ItemName="SceneAsset"/>
+		</Exec>
+		<ItemGroup>
+			<EmbeddedResource Include="@(SceneAsset)">
+				<LogicalName>StereoBalls.assets</LogicalName>
+			</EmbeddedResource>
+		</ItemGroup>
+	</Target>
+	<ItemGroup>
+		<!-- <Reference Include="System.Runtime" Version="9.0.0.0"/> -->
+		<PackageReference Include="StereoKit" Version="0.3.10"/>
+		<!-- <EmbeddedResource Include="bin/Release/net9.0/linux-x64/libStereoKitC.so"/> -->
+	</ItemGroup>
+	<ItemGroup>
+		<None Include="StereoBalls.csproj.user" Condition="Exists('StereoBalls.csproj.user')"/>
+	</ItemGroup>
+</Project>

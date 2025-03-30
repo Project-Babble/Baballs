@@ -1,0 +1,6 @@
+*.blend1
+*.sublime-project
+*.sublime-workspace
+*.user
+[Bb]in/
+[Oo]bj/
