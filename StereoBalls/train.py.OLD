@@ -1,0 +1,174 @@
+import os
+import torch
+import pandas as pd
+import numpy as np
+from PIL import Image, ImageFile
+from torch.utils.data import Dataset, DataLoader
+from sklearn.model_selection import train_test_split
+import timm
+import torch.nn as nn
+import torch.optim as optim
+import torchvision.transforms as transforms
+
+# TQDM import
+from tqdm import tqdm
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+# ===================== Dataset Definition =====================
+
+class BabbleDataset(Dataset):
+	"""
+	A simple Dataset that reads image filenames and corresponding
+	normalized (ndc_x, ndc_y) labels from a CSV file.
+	"""
+	def __init__(self, df, root_dir, transform=None):
+		"""
+		df: a pandas dataframe with columns ["frame", "ndc_x", "ndc_y"]
+		root_dir: path to folder containing images
+		transform: optional torchvision transform
+		"""
+		self.df = df.reset_index(drop=True)
+		self.root_dir = root_dir
+		self.transform = transform
+		
+	def __len__(self):
+		return len(self.df)
+	
+	def __getitem__(self, idx):
+		frame_num = int(self.df.loc[idx, "frame"])
+		img_path = os.path.join(self.root_dir, f"frame_{frame_num:06d}.png")
+		
+		image = Image.open(img_path).convert("L")
+		if self.transform:
+			image = self.transform(image)
+		else:
+			image = transforms.ToTensor()(image)
+
+		# Load label
+		ndc_x = self.df.loc[idx, "ndc_x"]
+		ndc_y = self.df.loc[idx, "ndc_y"]
+		label = torch.tensor([ndc_x, ndc_y], dtype=torch.float32)
+		
+		return image, label
+
+# ===================== Training & Validation =====================
+
+def train_one_epoch(model, dataloader, criterion, optimizer, device):
+
+	model.train()
+	running_loss = 0.0
+	
+	for batch_idx, (inputs, targets) in enumerate(tqdm(dataloader, desc="Training", leave=False)):
+		inputs = inputs.to(device)
+		targets = targets.to(device)
+		
+		optimizer.zero_grad()
+		outputs = model(inputs)
+		
+		loss = criterion(outputs, targets)
+		loss.backward()
+		optimizer.step()
+		
+		running_loss += loss.item()
+	
+	avg_loss = running_loss / len(dataloader)
+	return avg_loss
+
+def validate(model, dataloader, criterion, device):
+
+	model.eval()
+	running_loss = 0.0
+	
+
+	with torch.no_grad():
+		for inputs, targets in tqdm(dataloader, desc="Validation", leave=False):
+			inputs = inputs.to(device)
+			targets = targets.to(device)
+			
+			outputs = model(inputs)
+			loss = criterion(outputs, targets)
+			running_loss += loss.item()
+	
+	avg_loss = running_loss / len(dataloader)
+	return avg_loss
+
+def main():
+	# ---------------------------- Config ----------------------------
+	CSV_FILE = "./ndc_data_clean.csv" 
+	IMAGE_PATH = "./frames/frames"   
+	BATCH_SIZE = 16
+	NUM_EPOCHS = 10
+	LR = 1e-3
+	
+	NUM_WORKERS = 4
+	
+	DEVICE = "cpu"
+	
+	torch.set_num_threads(4)         #CPU core count
+	torch.set_num_interop_threads(4) #CPU core count
+
+	# ------------------------- Data Loading -------------------------
+	df = pd.read_csv(CSV_FILE)
+	
+	train_df, val_df = train_test_split(df, test_size=0.2, shuffle=True, random_state=42)
+	
+	transform = transforms.Compose([
+		transforms.Resize((256, 256)),
+		transforms.ToTensor(),
+	])
+	
+	train_dataset = BabbleDataset(train_df, root_dir=IMAGE_PATH, transform=transform)
+	val_dataset   = BabbleDataset(val_df,   root_dir=IMAGE_PATH, transform=transform)
+	
+	train_loader = DataLoader(
+		train_dataset, 
+		batch_size=BATCH_SIZE, 
+		shuffle=True, 
+		num_workers=NUM_WORKERS,
+		pin_memory=False,  
+		persistent_workers=True,
+	)
+	
+	val_loader = DataLoader(
+		val_dataset,
+		batch_size=BATCH_SIZE,
+		shuffle=False,
+		num_workers=NUM_WORKERS,
+		pin_memory=False,
+		persistent_workers=True,
+	)
+	
+	model = timm.create_model(
+		'timm/tinynet_e.in1k',
+		pretrained=True,
+		in_chans=1,
+		num_classes=2
+	)
+	
+	model = model.to(DEVICE)
+
+
+	criterion = nn.MSELoss()
+	optimizer = optim.Adam(model.parameters(), lr=LR)
+	
+	# ------------------------- Training Loop ------------------------
+	best_val_loss = float("inf")
+	
+	for epoch in range(NUM_EPOCHS):
+		print(f"Epoch [{epoch+1}/{NUM_EPOCHS}]")
+		
+		train_loss = train_one_epoch(model, train_loader, criterion, optimizer, DEVICE)
+		val_loss   = validate(model, val_loader, criterion, DEVICE)
+		
+		print(f"  Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+		
+		if val_loss < best_val_loss:
+			best_val_loss = val_loss
+			torch.save(model.state_dict(), "best_model.pth")
+			print("  Model improved. Saved to best_model.pth.")
+	
+	print("Training completed. Best validation loss:", best_val_loss)
+	
+if __name__ == "__main__":
+	main()

@@ -6,7 +6,7 @@
 #include <stddef.h>
 
 typedef int64_t BabbleTimestamp;
-const BabbleTimestamp BabbleTimestamp_Invalid = -1;
+static const BabbleTimestamp BabbleTimestamp_Invalid = -1;
 
 typedef uint8_t BabbleZones;
 enum BabbleZone : BabbleZones {
@@ -91,13 +91,17 @@ enum BabbleParam {
 	BabbleParam_COUNT,
 };
 
+struct BabbleImage_Plane {
+	size_t offset;
+	float weight;
+};
+
 struct BabbleImage {
 	const uint8_t *data;
 	size_t data_len;
 	uint32_t size[2];
 	size_t stride[2];
-	size_t planeOffsets[4];
-	float colorTransform[4];
+	struct BabbleImage_Plane planes[4];
 	float imageTransform[3][2];
 	enum BabbleZone zone;
 };
@@ -106,11 +110,11 @@ struct BabbleImage {
 // TODO: GPU frame support?
 
 struct BabbleRuntime *BabbleRuntime_init();
-void BabbleRuntime_free(struct BabbleRuntime *this);
-bool BabbleRuntime_loadModel(struct BabbleRuntime *this, const uint8_t model[], size_t model_len, BabbleZones zones); // TODO: split model and weights? precompilation?
-bool BabbleRuntime_pushFrame(struct BabbleRuntime *this, const struct BabbleImage images[], uint32_t images_len, BabbleTimestamp timestamp);
+void BabbleRuntime_free(struct BabbleRuntime *this_);
+bool BabbleRuntime_loadModel(struct BabbleRuntime *this_, const uint8_t model[], size_t model_len, BabbleZones zones); // TODO: separate model and weights? precompilation?
+BabbleZones BabbleRuntime_pushFrame(struct BabbleRuntime *this_, const struct BabbleImage images[], uint32_t images_len, BabbleTimestamp timestamp);
 typedef void BabbleRuntime_OnData(void *userptr, struct BabbleRuntime *runtime, BabbleZones zones, BabbleTimestamp timestamp);
-void BabbleRuntime_onData(struct BabbleRuntime *this, BabbleRuntime_OnData *onData, void *onData_userptr); // data is locked for duration of callback
-void BabbleRuntime_lockZones(struct BabbleRuntime *this, BabbleZones zones, bool wait); // ensures `BabbleRuntime_getParams()` and `BabbleRuntime_getGazes()` return fast, and prevents data from updating between calls
-BabbleTimestamp BabbleRuntime_getParams(struct BabbleRuntime *this, enum BabbleParam first, float params_out[], uint32_t params_len);
-BabbleTimestamp BabbleRuntime_getGazes(struct BabbleRuntime *this, float (*gazes_out)[2][4]);
+void BabbleRuntime_onData(struct BabbleRuntime *this_, BabbleRuntime_OnData *onData, void *onData_userptr); // data is locked for duration of callback
+void BabbleRuntime_lockZones(struct BabbleRuntime *this_, BabbleZones zones, bool wait); // ensures `BabbleRuntime_getParams()` and `BabbleRuntime_getGazes()` return fast, and prevents data from updating between calls
+BabbleTimestamp BabbleRuntime_getParams(struct BabbleRuntime *this_, enum BabbleParam first, float params_out[], uint32_t params_len);
+BabbleTimestamp BabbleRuntime_getGazes(struct BabbleRuntime *this_, float (*gazes_out)[2][4]);
