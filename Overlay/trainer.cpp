@@ -1,6 +1,6 @@
 // trainer.cpp
-#include <onnxruntime_cxx_api.h>
-#include <onnxruntime_training_c_api.h>
+#include <onnxruntime/onnxruntime_cxx_api.h>
+#include <onnxruntime/onnxruntime_training_c_api.h>
 #include <vector>
 #include <iostream>
 #include <fstream>
@@ -15,14 +15,14 @@
 #include "capture_data.h"
 #include "capture_reader.h"
 #include "flags.h"
+#include "path.h"
 
-#define STD_MIN(a, b) ((a) < (b) ? (a) : (b))
 
 // Configuration constants
-#define TRAIN_RESOLUTION 128
-#define NUM_FRAMES 4  // Updated for new model (current frame + 3 previous frames)
-#define NUM_CLASSES 10  // Updated for all eye tracking parameters (excluding fovAdjustDistance)
-#define ENABLE_CUDA 0  // Set to 1 to enable CUDA, 0 to use CPU only
+constexpr unsigned TRAIN_RESOLUTION = 128;
+constexpr unsigned NUM_FRAMES = 4;  // Updated for new model (current frame + 3 previous frames)
+constexpr unsigned NUM_CLASSES = 10;  // Updated for all eye tracking parameters (excluding fovAdjustDistance)
+constexpr bool ENABLE_CUDA = false;  // Set to 1 to enable CUDA, 0 to use CPU only
 
 
 #include <stdio.h>
@@ -59,16 +59,6 @@ float rgba_to_float(uint32_t rgba) {
     return ((rgba & 0xFF) / 255.0f);
 }
 
-// Helper function to convert string to wstring
-std::wstring to_wstring(const std::string& str) {
-    std::wstring result;
-    result.reserve(str.size());
-    for (char c : str) {
-        result.push_back(static_cast<wchar_t>(c));
-    }
-    return result;
-}
-
 // Structure to hold a temporal sequence of frames with pre-processed images
 struct TemporalSequence {
     std::vector<AlignedFrame> frames;  // Changed to AlignedFrame to match what read_capture_file returns
@@ -78,7 +68,7 @@ struct TemporalSequence {
 };
 
 // Function to extract temporal sequences from frames - updated to use AlignedFrame
-std::vector<TemporalSequence> createTemporalSequences(const std::vector<AlignedFrame>& frames, int num_frames) {
+static std::vector<TemporalSequence> createTemporalSequences(const std::vector<AlignedFrame>& frames, unsigned num_frames) {
     std::vector<TemporalSequence> sequences;
     
     if (frames.size() < num_frames) {
@@ -97,7 +87,7 @@ std::vector<TemporalSequence> createTemporalSequences(const std::vector<AlignedF
             seq.is_valid = true;
             
             // Collect all frames in the sequence
-            for (int j = 0; j < num_frames; j++) {
+            for (unsigned j = 0; j < num_frames; j++) {
                 seq.frames.push_back(frames[i + j]);
             }
             
@@ -281,14 +271,13 @@ int main(int argc, char* argv[]) {
     // Create environment
     printf("DEBUG: Creating ONNX environment...\n");
     fflush(stdout);
-    OrtEnv* env = NULL;
-    OrtStatus* status = g_ort_api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "TemporalEyeTracker", &env);
-    if (status != NULL) {
+    OrtEnv *envPtr = nullptr;
+    if (Ort::Status status = Ort::Status(g_ort_api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "TemporalEyeTracker", &envPtr))) {
         const char* error_message = g_ort_api->GetErrorMessage(status);
         fprintf(stderr, "Error creating environment: %s\n", error_message);
-        g_ort_api->ReleaseStatus(status);
         return 1;
     }
+    Ort::Env env = Ort::Env(envPtr);
     printf("DEBUG: Environment created successfully\n");
     fflush(stdout);
     
@@ -296,12 +285,9 @@ int main(int argc, char* argv[]) {
     printf("DEBUG: Creating session options...\n");
     fflush(stdout);
     OrtSessionOptions* session_options = NULL;
-    status = g_ort_api->CreateSessionOptions(&session_options);
-    if (status != NULL) {
+    if (Ort::Status status = Ort::Status(g_ort_api->CreateSessionOptions(&session_options))) {
         const char* error_message = g_ort_api->GetErrorMessage(status);
         fprintf(stderr, "Error creating session options: %s\n", error_message);
-        g_ort_api->ReleaseStatus(status);
-        g_ort_api->ReleaseEnv(env);
         return 1;
     }
     printf("DEBUG: Session options created successfully\n");
@@ -310,7 +296,11 @@ int main(int argc, char* argv[]) {
     // Set session options with optimizations
     printf("DEBUG: Setting graph optimization level...\n");
     fflush(stdout);
-    g_ort_api->SetSessionGraphOptimizationLevel(session_options, ORT_ENABLE_ALL);  // Enable all optimizations
+    if (Ort::Status status = Ort::Status(g_ort_api->SetSessionGraphOptimizationLevel(session_options, ORT_ENABLE_ALL))) { // Enable all optimizations
+        const char* error_message = g_ort_api->GetErrorMessage(status);
+        fprintf(stderr, "Error setting graph optimization level: %s\n", error_message);
+        return 1;
+    }
     printf("DEBUG: Graph optimization set successfully\n");
     fflush(stdout);
     
@@ -318,10 +308,8 @@ int main(int argc, char* argv[]) {
     // Try to use GPU if available
     printf("DEBUG: Trying to set up CUDA provider...\n");
     fflush(stdout);
-    OrtStatus* gpu_status = g_ort_api->SessionOptionsAppendExecutionProvider_CUDA(session_options, 0);
-    if (gpu_status != NULL) {
+    if (Ort::Status status = Ort::Status(g_ort_api->SessionOptionsAppendExecutionProvider_CUDA(session_options, 0))) {
         printf("CUDA not available, falling back to CPU\n");
-        g_ort_api->ReleaseStatus(gpu_status);
         
         printf("DEBUG: Setting up CPU threading...\n");
         fflush(stdout);
@@ -344,8 +332,8 @@ int main(int argc, char* argv[]) {
     uint32_t threads = get_cpu_thread_count() - 1;  // Leave one core free
     if(threads < 1) threads = 1;
     
-    g_ort_api->SetIntraOpNumThreads(session_options, threads);
-    g_ort_api->SetInterOpNumThreads(session_options, threads);
+    Ort::Status(g_ort_api->SetIntraOpNumThreads(session_options, threads));
+    Ort::Status(g_ort_api->SetInterOpNumThreads(session_options, threads));
     printf("Using %u CPU threads\n", threads);
 #endif
     printf("DEBUG: Execution provider setup complete\n");
@@ -359,14 +347,10 @@ int main(int argc, char* argv[]) {
     
     // Load checkpoint
     OrtCheckpointState* checkpoint_state = NULL;
-    status = g_ort_training_api->LoadCheckpoint(to_wstring(checkpoint_path).c_str(), &checkpoint_state);
-    
-    if (status != NULL) {
+    if (Ort::Status status = Ort::Status(g_ort_training_api->LoadCheckpoint(to_path_string(checkpoint_path).c_str(), &checkpoint_state))) {
         const char* error_message = g_ort_api->GetErrorMessage(status);
         fprintf(stderr, "Error loading checkpoint: %s\n", error_message);
-        g_ort_api->ReleaseStatus(status);
         g_ort_api->ReleaseSessionOptions(session_options);
-        g_ort_api->ReleaseEnv(env);
         return 1;
     }
     
@@ -380,23 +364,19 @@ int main(int argc, char* argv[]) {
     printf("Optimizer model: %s\n", optimizer_model_path.c_str());
     fflush(stdout);
     OrtTrainingSession* training_session = NULL;
-    status = g_ort_training_api->CreateTrainingSession(
-        env,
-        session_options,
-        checkpoint_state,
-        to_wstring(training_model_path).c_str(),
-        to_wstring(eval_model_path).c_str(),
-        to_wstring(optimizer_model_path).c_str(),
-        &training_session
-    );
-    
-    if (status != NULL) {
+    if (Ort::Status status = Ort::Status(g_ort_training_api->CreateTrainingSession(
+                env,
+                session_options,
+                checkpoint_state,
+                to_path_string(training_model_path).c_str(),
+                to_path_string(eval_model_path).c_str(),
+                to_path_string(optimizer_model_path).c_str(),
+                &training_session
+            ))) {
         const char* error_message = g_ort_api->GetErrorMessage(status);
         fprintf(stderr, "Error creating training session: %s\n", error_message);
-        g_ort_api->ReleaseStatus(status);
         g_ort_training_api->ReleaseCheckpointState(checkpoint_state);
         g_ort_api->ReleaseSessionOptions(session_options);
-        g_ort_api->ReleaseEnv(env);
         return 1;
     }
     
@@ -412,37 +392,30 @@ int main(int argc, char* argv[]) {
     
     // Set learning rate
     float learning_rate = 1e-4f;  // Match the learning rate from Python trainer
-    status = g_ort_training_api->SetLearningRate(training_session, learning_rate);
-    if (status != NULL) {
+    if (Ort::Status status = Ort::Status(g_ort_training_api->SetLearningRate(training_session, learning_rate))) {
         const char* error_message = g_ort_api->GetErrorMessage(status);
         fprintf(stderr, "Error setting learning rate: %s\n", error_message);
-        g_ort_api->ReleaseStatus(status);
     } else {
         printf("Learning rate set to: %f\n", learning_rate);
     }
     
     // Verify learning rate was set correctly
     float current_lr = 0.0f;
-    status = g_ort_training_api->GetLearningRate(training_session, &current_lr);
-    if (status == NULL) {
-        printf("Confirmed learning rate: %f\n", current_lr);
-    } else {
+    if (Ort::Status status = Ort::Status(g_ort_training_api->GetLearningRate(training_session, &current_lr))) {
         const char* error_message = g_ort_api->GetErrorMessage(status);
         fprintf(stderr, "Error getting learning rate: %s\n", error_message);
-        g_ort_api->ReleaseStatus(status);
+    } else {
+        printf("Confirmed learning rate: %f\n", current_lr);
     }
     
     // Create memory info for tensors
     OrtMemoryInfo* memory_info = NULL;
-    status = g_ort_api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info);
-    if (status != NULL) {
+    if (Ort::Status status = Ort::Status(g_ort_api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info))) {
         const char* error_message = g_ort_api->GetErrorMessage(status);
         fprintf(stderr, "Error creating memory info: %s\n", error_message);
-        g_ort_api->ReleaseStatus(status);
         g_ort_training_api->ReleaseTrainingSession(training_session);
         g_ort_training_api->ReleaseCheckpointState(checkpoint_state);
         g_ort_api->ReleaseSessionOptions(session_options);
-        g_ort_api->ReleaseEnv(env);
         return 1;
     }
     
@@ -485,7 +458,7 @@ int main(int argc, char* argv[]) {
         // Process data in batches
         for (size_t batch_start = 0; batch_start < sequences.size(); batch_start += batch_size) {
             // Determine actual batch size (may be smaller for the last batch)
-            size_t current_batch_size = STD_MIN(batch_size, sequences.size() - batch_start);
+            size_t current_batch_size = std::min(batch_size, sequences.size() - batch_start);
             
             // Resize pre-allocated batch vectors instead of creating new ones
             size_t required_image_size = current_batch_size * 2 * NUM_FRAMES * TRAIN_RESOLUTION * TRAIN_RESOLUTION;
@@ -556,7 +529,7 @@ int main(int argc, char* argv[]) {
                 batch_labels[i * NUM_CLASSES + 9] = dilate;
                 
                 // Process all frames in the sequence (most recent frame first)
-                for (int frame_idx = 0; frame_idx < NUM_FRAMES; frame_idx++) {
+                for (unsigned frame_idx = 0; frame_idx < NUM_FRAMES; frame_idx++) {
                     // Get frame from sequence (most recent to oldest)
                     const auto& frame = sequence.frames[NUM_FRAMES - 1 - frame_idx];
                     
@@ -577,12 +550,12 @@ int main(int argc, char* argv[]) {
                     const float x_scale = (float)left_width / TRAIN_RESOLUTION;
                     const float y_scale = (float)left_height / TRAIN_RESOLUTION;
                     
-                    for (int y = 0; y < TRAIN_RESOLUTION; y++) {
+                    for (unsigned y = 0; y < TRAIN_RESOLUTION; y++) {
                         const int src_y = std::max(0, std::min((int)(y * y_scale), left_height - 1));
                         const int src_row_offset = src_y * left_width;
                         const size_t target_row_offset = frame_offset + y * TRAIN_RESOLUTION;
                         
-                        for (int x = 0; x < TRAIN_RESOLUTION; x++) {
+                        for (unsigned x = 0; x < TRAIN_RESOLUTION; x++) {
                             const int src_x = std::max(0, std::min((int)(x * x_scale), left_width - 1));
                             const uint32_t pixel = left_eye_data[src_row_offset + src_x];
                             batch_images[target_row_offset + x] = (pixel & 0xFF) * (1.0f / 255.0f);
@@ -594,12 +567,12 @@ int main(int argc, char* argv[]) {
                     const float y_scale_r = (float)right_height / TRAIN_RESOLUTION;
                     const size_t right_eye_offset = frame_offset + TRAIN_RESOLUTION * TRAIN_RESOLUTION;
                     
-                    for (int y = 0; y < TRAIN_RESOLUTION; y++) {
+                    for (unsigned y = 0; y < TRAIN_RESOLUTION; y++) {
                         const int src_y = std::max(0, std::min((int)(y * y_scale_r), right_height - 1));
                         const int src_row_offset = src_y * right_width;
                         const size_t target_row_offset = right_eye_offset + y * TRAIN_RESOLUTION;
                         
-                        for (int x = 0; x < TRAIN_RESOLUTION; x++) {
+                        for (unsigned x = 0; x < TRAIN_RESOLUTION; x++) {
                             const int src_x = std::max(0, std::min((int)(x * x_scale_r), right_width - 1));
                             const uint32_t pixel = right_eye_data[src_row_offset + src_x];
                             batch_images[target_row_offset + x] = (pixel & 0xFF) * (1.0f / 255.0f);
@@ -617,20 +590,17 @@ int main(int argc, char* argv[]) {
             const int64_t input_shape[] = {(int64_t)current_batch_size, 2 * NUM_FRAMES, TRAIN_RESOLUTION, TRAIN_RESOLUTION};
             OrtValue* input_tensor = NULL;
             
-            status = g_ort_api->CreateTensorWithDataAsOrtValue(
-                memory_info,
-                batch_images.data(),
-                batch_images.size() * sizeof(float),
-                input_shape,
-                4,
-                ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
-                &input_tensor
-            );
-            
-            if (status != NULL) {
+            if (Ort::Status status = Ort::Status(g_ort_api->CreateTensorWithDataAsOrtValue(
+                        memory_info,
+                        batch_images.data(),
+                        batch_images.size() * sizeof(float),
+                        input_shape,
+                        4,
+                        ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
+                        &input_tensor
+                    ))) {
                 const char* error_message = g_ort_api->GetErrorMessage(status);
                 fprintf(stderr, "Error creating input tensor: %s\n", error_message);
-                g_ort_api->ReleaseStatus(status);
                 continue;  // Skip this batch
             }
             
@@ -641,20 +611,17 @@ int main(int argc, char* argv[]) {
             OrtValue* label_tensor = NULL;
             //printf("Creating label tensor with shape: [%lld, %lld]\n", label_shape[0], label_shape[1]);
             
-            status = g_ort_api->CreateTensorWithDataAsOrtValue(
-                memory_info,
-                batch_labels.data(),
-                batch_labels.size() * sizeof(float),
-                label_shape,
-                2,
-                ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
-                &label_tensor
-            );
-            
-            if (status != NULL) {
+            if (Ort::Status status = Ort::Status(g_ort_api->CreateTensorWithDataAsOrtValue(
+                        memory_info,
+                        batch_labels.data(),
+                        batch_labels.size() * sizeof(float),
+                        label_shape,
+                        2,
+                        ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
+                        &label_tensor
+                    ))) {
                 const char* error_message = g_ort_api->GetErrorMessage(status);
                 fprintf(stderr, "Error creating label tensor: %s\n", error_message);
-                g_ort_api->ReleaseStatus(status);
                 g_ort_api->ReleaseValue(input_tensor);
                 continue;  // Skip this batch
             }
@@ -669,19 +636,16 @@ int main(int argc, char* argv[]) {
             //fflush(stdout);
             
             // Run training step
-            status = g_ort_training_api->TrainStep(
-                training_session,
-                NULL,
-                2,
-                input_values,
-                1,
-                output_values
-            );
-            
-            if (status != NULL) {
+            if (Ort::Status status = Ort::Status(g_ort_training_api->TrainStep(
+                        training_session,
+                        NULL,
+                        2,
+                        input_values,
+                        1,
+                        output_values
+                    ))) {
                 const char* error_message = g_ort_api->GetErrorMessage(status);
                 fprintf(stderr, "Error in training step: %s\n", error_message);
-                g_ort_api->ReleaseStatus(status);
                 g_ort_api->ReleaseValue(input_tensor);
                 g_ort_api->ReleaseValue(label_tensor);
                 continue;  // Skip this batch
@@ -693,8 +657,10 @@ int main(int argc, char* argv[]) {
             float batch_loss = 0.0f;
             if (output_values[0] != NULL) {
                 float* loss_data = NULL;
-                status = g_ort_api->GetTensorMutableData(output_values[0], (void**)&loss_data);
-                if (status == NULL) {
+                if (Ort::Status status = Ort::Status(g_ort_api->GetTensorMutableData(output_values[0], (void**)&loss_data))) {
+                    const char* error_message = g_ort_api->GetErrorMessage(status);
+                    fprintf(stderr, "Error getting loss data: %s\n", error_message);
+                } else {
                     batch_loss = loss_data[0];
                     epoch_loss_sum += batch_loss;
                     
@@ -704,27 +670,19 @@ int main(int argc, char* argv[]) {
                            (sequences.size() + batch_size - 1) / batch_size, 
                            batch_loss);
                     fflush(stdout);
-                } else {
-                    const char* error_message = g_ort_api->GetErrorMessage(status);
-                    fprintf(stderr, "Error getting loss data: %s\n", error_message);
-                    g_ort_api->ReleaseStatus(status);
                 }
             }
             
             // Run optimizer step - CRITICAL for weight updates
-            status = g_ort_training_api->OptimizerStep(training_session, NULL);
-            if (status != NULL) {
+            if (Ort::Status status = Ort::Status(g_ort_training_api->OptimizerStep(training_session, NULL))) {
                 const char* error_message = g_ort_api->GetErrorMessage(status);
                 fprintf(stderr, "\nError in optimizer step: %s\n", error_message);
-                g_ort_api->ReleaseStatus(status);
             }
             
             // Reset gradients AFTER optimizer step
-            status = g_ort_training_api->LazyResetGrad(training_session);
-            if (status != NULL) {
+            if (Ort::Status status = Ort::Status(g_ort_training_api->LazyResetGrad(training_session))) {
                 const char* error_message = g_ort_api->GetErrorMessage(status);
                 fprintf(stderr, "\nError resetting gradients: %s\n", error_message);
-                g_ort_api->ReleaseStatus(status);
             }
             
             // Check parameter changes periodically
@@ -758,16 +716,13 @@ int main(int argc, char* argv[]) {
             
             // Save best model checkpoint
             std::string best_checkpoint_path = "onnx_artifacts/training/checkpoint_best";
-            status = g_ort_training_api->SaveCheckpoint(
-                checkpoint_state,
-                to_wstring(best_checkpoint_path).c_str(),
-                true  // Include optimizer state
-            );
-            
-            if (status != NULL) {
+            if (Ort::Status status = Ort::Status(g_ort_training_api->SaveCheckpoint(
+                        checkpoint_state,
+                        to_path_string(best_checkpoint_path).c_str(),
+                        true  // Include optimizer state
+                    ))) {
                 const char* error_message = g_ort_api->GetErrorMessage(status);
                 fprintf(stderr, "Error saving best checkpoint: %s\n", error_message);
-                g_ort_api->ReleaseStatus(status);
             } else {
                 printf("Best checkpoint saved to %s\n", best_checkpoint_path.c_str());
             }
@@ -776,16 +731,13 @@ int main(int argc, char* argv[]) {
         // Save checkpoint periodically
         if ((epoch + 1) % save_interval == 0 || epoch == num_epochs - 1) {
             std::string checkpoint_save_path = "onnx_artifacts/training/checkpoint_epoch" + std::to_string(epoch + 1);
-            status = g_ort_training_api->SaveCheckpoint(
-                checkpoint_state,
-                to_wstring(checkpoint_save_path).c_str(),
-                true  // Include optimizer state
-            );
-            
-            if (status != NULL) {
+            if (Ort::Status status = Ort::Status(g_ort_training_api->SaveCheckpoint(
+                        checkpoint_state,
+                        to_path_string(checkpoint_save_path).c_str(),
+                        true  // Include optimizer state
+                    ))) {
                 const char* error_message = g_ort_api->GetErrorMessage(status);
                 fprintf(stderr, "Error saving checkpoint: %s\n", error_message);
-                g_ort_api->ReleaseStatus(status);
             } else {
                 printf("Checkpoint saved to %s\n", checkpoint_save_path.c_str());
             }
@@ -801,24 +753,18 @@ int main(int argc, char* argv[]) {
     std::chrono::duration<double> total_training_time = training_end_time - training_start_time;
     printf("Total training time: %.2f seconds\n", total_training_time.count());
     
-    // Export the model
-    std::wstring wide_onnx_path = to_wstring(onnx_model_path);
-    
     // Define the output names for your inference model
     const char* output_names[] = {"output"}; 
     
     // Export the model
-    status = g_ort_training_api->ExportModelForInferencing(
-        training_session,
-        wide_onnx_path.c_str(),
-        1,  // Number of outputs
-        output_names
-    );
-    
-    if (status != NULL) {
+    if (Ort::Status status = Ort::Status(g_ort_training_api->ExportModelForInferencing(
+                training_session,
+                to_path_string(onnx_model_path).c_str(),
+                1,  // Number of outputs
+                output_names
+            ))) {
         const char* error_message = g_ort_api->GetErrorMessage(status);
         fprintf(stderr, "Error exporting model to ONNX: %s\n", error_message);
-        g_ort_api->ReleaseStatus(status);
     } else {
         printf("Model successfully exported to ONNX at: %s\n", onnx_model_path.c_str());
     }
@@ -828,7 +774,6 @@ int main(int argc, char* argv[]) {
     g_ort_training_api->ReleaseTrainingSession(training_session);
     g_ort_training_api->ReleaseCheckpointState(checkpoint_state);
     g_ort_api->ReleaseSessionOptions(session_options);
-    g_ort_api->ReleaseEnv(env);
     
     printf("Training completed successfully!\n");
     return 0;

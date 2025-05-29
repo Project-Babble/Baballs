@@ -2,12 +2,15 @@
 
 #include "dashboard_ui.h"
 
-#define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
 
 #include <GL/gl.h>
 #include <GL/glu.h>
+#ifdef _WIN32
 #include <Windows.h>
+#else
+#include <linux/limits.h>
+#endif
 #include <cstring>
 #include <iostream>
 
@@ -29,9 +32,7 @@ DashboardUI::DashboardUI() :
     m_textureHeight(DASHBOARD_HEIGHT),
     m_textureData(nullptr),
     m_statusDisplay("Ready", 20, DASHBOARD_HEIGHT - 40),
-    m_hWnd(NULL),
-    m_hDC(NULL),
-    m_hRC(NULL),
+    m_glContext(),
     m_fontBuffer(nullptr),
     m_fontSize(32.0f)  // Default font size
 {
@@ -167,10 +168,10 @@ DashboardUI::~DashboardUI() {
 }
 
 bool DashboardUI::Initialize() {
-    char iconPath[MAX_PATH];
+    char iconPath[PATH_MAX] = {};
 
     // Initialize OpenGL first
-    if (!InitializeOpenGL()) {
+    if (!m_glContext.Initialize()) {
         std::cout << "Failed to initialize OpenGL for dashboard" << std::endl;
         return false;
     }
@@ -191,12 +192,16 @@ bool DashboardUI::Initialize() {
         &m_dashboardHandle, 
         &neighborHandle);  // Change this from &vr::k_ulOverlayHandleInvalid to nullptr
 
+    #ifdef _WIN32
     // Get absolute path to the icon file
-    if (GetFullPathNameA("./icon.png", MAX_PATH, iconPath, nullptr) == 0) {
+    if (GetFullPathNameA("./icon.png", PATH_MAX, iconPath, nullptr) == 0) {
         std::cout << "Failed to get full path for icon" << std::endl;
         // Continue anyway - we'll try with the relative path
-        strcpy(iconPath, "./icon.png");
+        strncpy(iconPath, "./icon.png", sizeof(iconPath) - 1);
     }
+    #else
+    strncpy(iconPath, "./icon.png", sizeof(iconPath) - 1);
+    #endif
     
     // Set thumbnail image - this is the method available in most OpenVR versions
     vr::VROverlayError iconError = vr::VROverlay()->SetOverlayFromFile(m_dashboardHandle, iconPath);
@@ -257,23 +262,6 @@ void DashboardUI::Shutdown() {
         delete[] m_textureData;
         m_textureData = nullptr;
     }
-    
-    // Clean up OpenGL
-    if (m_hRC) {
-        wglMakeCurrent(NULL, NULL);
-        wglDeleteContext(m_hRC);
-        m_hRC = NULL;
-    }
-    
-    if (m_hDC && m_hWnd) {
-        ReleaseDC(m_hWnd, m_hDC);
-        m_hDC = NULL;
-    }
-    
-    if (m_hWnd) {
-        DestroyWindow(m_hWnd);
-        m_hWnd = NULL;
-    }
 }
 
 void DashboardUI::Update() {
@@ -293,87 +281,10 @@ void DashboardUI::SetStatusText(const std::string& text) {
     m_statusDisplay.text = text;
 }
 
-bool DashboardUI::InitializeOpenGL() {
-    // Create a dummy window for OpenGL context
-    WNDCLASS wc = {0};
-    wc.lpfnWndProc = DefWindowProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = "DashboardGLClass";
-    
-    if (!RegisterClass(&wc)) {
-        std::cout << "Failed to register window class" << std::endl;
-        return false;
-    }
-    
-    m_hWnd = CreateWindow("DashboardGLClass", "Dashboard GL Window", 0, 0, 0, 1, 1, NULL, NULL, GetModuleHandle(NULL), NULL);
-    if (!m_hWnd) {
-        std::cout << "Failed to create dummy window" << std::endl;
-        return false;
-    }
-    
-    m_hDC = GetDC(m_hWnd);
-    if (!m_hDC) {
-        std::cout << "Failed to get device context" << std::endl;
-        DestroyWindow(m_hWnd);
-        m_hWnd = NULL;
-        return false;
-    }
-    
-    PIXELFORMATDESCRIPTOR pfd = {0};
-    pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
-    pfd.nVersion = 1;
-    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-    pfd.iPixelType = PFD_TYPE_RGBA;
-    pfd.cColorBits = 32;
-    pfd.cDepthBits = 24;
-    pfd.cStencilBits = 8;
-    
-    int pixelFormat = ChoosePixelFormat(m_hDC, &pfd);
-    if (!pixelFormat) {
-        std::cout << "Failed to choose pixel format" << std::endl;
-        ReleaseDC(m_hWnd, m_hDC);
-        DestroyWindow(m_hWnd);
-        m_hDC = NULL;
-        m_hWnd = NULL;
-        return false;
-    }
-    
-    if (!SetPixelFormat(m_hDC, pixelFormat, &pfd)) {
-        std::cout << "Failed to set pixel format" << std::endl;
-        ReleaseDC(m_hWnd, m_hDC);
-        DestroyWindow(m_hWnd);
-        m_hDC = NULL;
-        m_hWnd = NULL;
-        return false;
-    }
-    
-    m_hRC = wglCreateContext(m_hDC);
-    if (!m_hRC) {
-        std::cout << "Failed to create OpenGL rendering context" << std::endl;
-        ReleaseDC(m_hWnd, m_hDC);
-        DestroyWindow(m_hWnd);
-        m_hDC = NULL;
-        m_hWnd = NULL;
-        return false;
-    }
-    
-    if (!wglMakeCurrent(m_hDC, m_hRC)) {
-        std::cout << "Failed to make OpenGL context current" << std::endl;
-        wglDeleteContext(m_hRC);
-        ReleaseDC(m_hWnd, m_hDC);
-        DestroyWindow(m_hWnd);
-        m_hRC = NULL;
-        m_hDC = NULL;
-        m_hWnd = NULL;
-        return false;
-    }
-    
-    return true;
-}
-
 bool DashboardUI::CreateDashboardTexture() {
     // Make sure OpenGL context is current
-    wglMakeCurrent(m_hDC, m_hRC);
+    if (!m_glContext.MakeCurrent())
+        return false;
     
     // Allocate memory for the texture data
     m_textureData = new uint8_t[m_textureWidth * m_textureHeight * 4];
@@ -415,7 +326,8 @@ bool DashboardUI::CreateDashboardTexture() {
 
 void DashboardUI::UpdateOverlayTexture() {
     // Make sure OpenGL context is current
-    wglMakeCurrent(m_hDC, m_hRC);
+    if (!m_glContext.MakeCurrent())
+        return;
     
     // Only update if the texture exists
     if (m_glTextureId != 0) {
@@ -424,7 +336,7 @@ void DashboardUI::UpdateOverlayTexture() {
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_textureWidth, m_textureHeight, GL_RGBA, GL_UNSIGNED_BYTE, m_textureData);
         
         // Set up the texture for the overlay
-        vr::Texture_t texture = {0};
+        vr::Texture_t texture = {};
         texture.handle = (void*)(uintptr_t)m_glTextureId;
         texture.eType = vr::TextureType_OpenGL;
         texture.eColorSpace = vr::ColorSpace_Auto;

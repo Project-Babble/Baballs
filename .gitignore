@@ -1,7 +1,11 @@
-/Labeling/frames
-/Labeling/utils/__pycache__
-/frames
+*.log
 /Blinking
-/Inference/__pycache__
+/frames
 /Inference/dev
-/Inference/utils/__pycache__
+/Labeling/frames
+/Overlay/*.bin
+/Overlay/.obj/
+/Overlay/gaze_overlay
+/Overlay/makefile.user
+/Overlay/trainer
+__pycache__

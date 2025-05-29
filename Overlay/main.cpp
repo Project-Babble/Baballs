@@ -7,12 +7,13 @@
   #pragma comment(lib, "ws2_32.lib")
 #endif
 
-#include <iostream>
 #include <chrono>
-#include <thread>
-#include <string>
-#include <sstream>
+#include <inttypes.h>
 #include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <thread>
 #ifdef _WIN32
     #include <conio.h>
     #include <windows.h>
@@ -23,18 +24,19 @@
 #include <openvr/openvr.h>
 
 
-#include "overlay_manager.h"
-#include "math_utils.h"
+#include "capture_data.h"
 #include "config.h"
 #include "dashboard_ui.h"
-#include "numpy_io.h"
-#include "frame_buffer.h"
-#include "rest_server.h"
-#include "capture_data.h"
-#include "trainer_wrapper.h"
 #include "flags.h"
+#include "frame_buffer.h"
+#include "math_utils.h"
+#include "numpy_io.h"
+#include "overlay_manager.h"
+#include "path.h"
+#include "rest_server.h"
+#include "trainer_wrapper.h"
 #include <turbojpeg.h>
-#include <onnxruntime_cxx_api.h>
+#include <onnxruntime/onnxruntime_cxx_api.h>
 #include <fstream>
 #include <memory>
 
@@ -73,7 +75,7 @@ bool writeCaptureFrame(FileHandle handle, const void* data, size_t size) {
         DWORD bytesWritten;
         return WriteFile(handle, data, (DWORD)size, &bytesWritten, NULL) && bytesWritten == size;
     #else
-        return write(handle, data, size) == size;
+        return (size_t)write(handle, data, size) == size;
     #endif
 }
 
@@ -266,11 +268,8 @@ void RunPreviewInference(FrameBuffer* frameBufferLeft, FrameBuffer* frameBufferR
         
         // Create session
         printf("Loading ONNX model...\n");
-        // Convert the model path from std::string to std::wstring
-        std::wstring wModelPath;
-        wModelPath.assign(g_PreviewModelPath.begin(), g_PreviewModelPath.end());
         Ort::Env g_OrtEnv{ORT_LOGGING_LEVEL_WARNING, "BaballsPreview"};
-        g_OrtSession = std::make_unique<Ort::Session>(g_OrtEnv, wModelPath.c_str(), sessionOptions);
+        g_OrtSession = std::make_unique<Ort::Session>(g_OrtEnv, to_path_string(g_PreviewModelPath).c_str(), sessionOptions);
         printf("Model loaded successfully\n");
         
         // Get model info
@@ -552,10 +551,7 @@ int main(int argc, char* argv[])
         std::string sWidth = std::to_string(0);
         std::string sHeight = std::to_string(0);
         try{
-            printf(params.at("left").c_str());
-            printf("\n");
-            printf(params.at("right").c_str());
-            printf("\n");
+            printf("%s\n%s\n", params.at("left").c_str(), params.at("right").c_str());
             frameBufferRight.setURL(params.at("left").c_str());
             frameBufferLeft.setURL(params.at("right").c_str());
 
@@ -780,7 +776,7 @@ int main(int argc, char* argv[])
     
     char filename[256];
     uint64_t start_time = current_time_ms();
-    snprintf(filename, sizeof(filename), "capture_%llu.bin", start_time);
+    snprintf(filename, sizeof(filename), "capture_%" PRIu64".bin", start_time);
     
     FileHandle captureFile = openCaptureFile(filename);
     if (!isValidHandle(captureFile)) {

@@ -1,13 +1,11 @@
 #pragma once
+#include "opengl_context.h"
 #include "stb_truetype.h"
 #include <openvr/openvr.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
 #include <functional>
-#ifdef _WIN32
-    #include <Windows.h>
-#endif
 #include <GL/gl.h>
 
 // Simple button class for dashboard UI
@@ -54,13 +52,9 @@ private:
     std::vector<DashboardButton> m_buttons;
     TextDisplay m_statusDisplay;
     
-    // OpenGL context (needed for texture)
-    HWND m_hWnd;
-    HDC m_hDC;
-    HGLRC m_hRC;
+    OpenglContext m_glContext;
     
     // Helper methods
-    bool InitializeOpenGL();
     bool CreateDashboardTexture();
     void UpdateOverlayTexture();
     void RenderUI();

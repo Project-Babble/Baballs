@@ -73,7 +73,7 @@ RoutineController::RoutineController(float maxMoveSpeed)
 }
 
 float getRandomFloat() {
-    return -1.0f + 2.0f * (static_cast<float>(rand()) / RAND_MAX);
+    return -1.0f + 2.0f * static_cast<float>(static_cast<double>(rand()) / RAND_MAX);
 }
 
 /**

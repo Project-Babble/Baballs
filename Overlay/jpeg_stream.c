@@ -262,7 +262,7 @@ MJPEGStream* GetStreamHandle(const char* url) {
     // Read HTTP response headers
     printf("GetStreamHandle: Reading HTTP response headers...\n");
     char headers[8192] = {0};
-    int headers_len = 0;
+    unsigned headers_len = 0;
     int headers_complete = 0;
     
     while (!headers_complete && headers_len < sizeof(headers) - 1) {
@@ -413,7 +413,7 @@ unsigned char* DecodeFrame(MJPEGStream* stream, int* width, int* height, uint64_
         
         // Find Content-Type and Content-Length headers
         char* headers_end = NULL;
-        int content_length = -1;
+        // int content_length = -1;
         
         while (1) {
             if (stream->buffer_pos + 4 >= stream->buffer_len) {
@@ -431,7 +431,7 @@ unsigned char* DecodeFrame(MJPEGStream* stream, int* width, int* height, uint64_
                 char* timestamp_header = strstr(stream->buffer + stream->buffer_pos, "X-Timestamp:");
 
                 if (content_length_header) {
-                    content_length = atoi(content_length_header + 16);
+                    // content_length = atoi(content_length_header + 16);
                     //printf("Found Content-Length: %d\n", content_length);
                 }
 
@@ -593,7 +593,7 @@ unsigned char* DecodeFrame(MJPEGStream* stream, int* width, int* height, uint64_
     else {
         // Original non-chunked code path
         // Find Content-Type and Content-Length headers
-        char* content_type = NULL;
+        // char* content_type = NULL;
         int content_length = -1;
         char* headers_end = NULL;
         
@@ -609,7 +609,7 @@ unsigned char* DecodeFrame(MJPEGStream* stream, int* width, int* height, uint64_
             if (headers_end) {
                 *headers_end = '\0';  // Temporarily null-terminate for strstr
                 
-                char* content_type_header = strstr(stream->buffer + stream->buffer_pos, "Content-Type: image/jpeg");
+                // char* content_type_header = strstr(stream->buffer + stream->buffer_pos, "Content-Type: image/jpeg");
                 char* content_length_header = strstr(stream->buffer + stream->buffer_pos, "Content-Length:");
                 char* timestamp_header = strstr(stream->buffer + stream->buffer_pos, "X-Timestamp:");
                 
@@ -654,14 +654,14 @@ unsigned char* DecodeFrame(MJPEGStream* stream, int* width, int* height, uint64_
             
             // Copy what we already have
             size_t available = stream->buffer_len - stream->buffer_pos;
-            size_t to_copy = (available > content_length) ? content_length : available;
+            size_t to_copy = (available > (unsigned)content_length) ? (unsigned)content_length : available;
             memcpy(jpeg_data, stream->buffer + stream->buffer_pos, to_copy);
             
             // Read the rest if needed
             size_t total_read = to_copy;
             stream->buffer_pos += to_copy;
             
-            while (total_read < content_length) {
+            while (total_read < (unsigned)content_length) {
                 if (stream->buffer_pos >= stream->buffer_len) {
                     if (!fill_buffer(stream)) {
                         free(jpeg_data);
@@ -671,8 +671,8 @@ unsigned char* DecodeFrame(MJPEGStream* stream, int* width, int* height, uint64_
                 }
                 
                 available = stream->buffer_len - stream->buffer_pos;
-                to_copy = ((content_length - total_read) < available) ? 
-                           (content_length - total_read) : available;
+                to_copy = (((unsigned)content_length - total_read) < available) ? 
+                           ((unsigned)content_length - total_read) : available;
                 
                 memcpy(jpeg_data + total_read, stream->buffer + stream->buffer_pos, to_copy);
                 total_read += to_copy;

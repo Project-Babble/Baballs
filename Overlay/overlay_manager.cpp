@@ -1,10 +1,11 @@
 #include "overlay_manager.h"
 #include "routine.h"
 #include "flags.h"
-#include <cstring>
-#include <cmath>
-#include <string>
 #include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <inttypes.h>
+#include <string>
 
 #ifndef max
 #define max(a,b) ((a) > (b) ? (a) : (b))
@@ -13,7 +14,6 @@
 #define min(a,b) ((a) < (b) ? (a) : (b))
 #endif
 
-#define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
 
 // Target texture constants
@@ -39,34 +39,15 @@ bool OverlayManager::s_routineSampleWritten = false;
 bool OverlayManager::s_positionInitialized = false;
 
 OverlayManager::OverlayManager() :
-    m_ulOverlayHandle(vr::k_ulOverlayHandleInvalid),
-    m_ulThumbnailHandle(vr::k_ulOverlayHandleInvalid),
-    m_ulBorderOverlayHandle(vr::k_ulOverlayHandleInvalid),
-    m_ulTextOverlayHandle(vr::k_ulOverlayHandleInvalid),
-    m_glTextureId(0),
-    m_glBorderTextureId(0),
-    m_glTextTextureId(0),
+    m_textTextureWidth(TEXT_TEXTURE_WIDTH),
+    m_textTextureHeight(TEXT_TEXTURE_HEIGHT),
+    g_routineController(RoutineController(1.15f)),
     m_nTextureWidth(TARGET_TEXTURE_WIDTH),
     m_nTextureHeight(TARGET_TEXTURE_HEIGHT),
     m_borderTextureWidth(BORDER_TEXTURE_WIDTH),
     m_borderTextureHeight(BORDER_TEXTURE_HEIGHT),
-    m_textTextureWidth(TEXT_TEXTURE_WIDTH),
-    m_textTextureHeight(TEXT_TEXTURE_HEIGHT),
-    m_pTextureData(nullptr),
-    m_borderTextureData(nullptr),
-    m_textTextureData(nullptr),
-    m_targetYawAngle(0.0f),
-    m_targetPitchAngle(0.0f),
-    m_isVisible(true),
-    m_targetIsPreview(false),
-    g_routineController(RoutineController(1.15f)),
-    m_hWnd(NULL),
-    m_hDC(NULL),
-    m_hRC(NULL),
-    m_showText(true),
     m_displayText("TEST TEST TEST"),
-    m_fontBuffer(nullptr),
-    m_fontSize(48.0f)  // Default font size
+    m_fontSize(48.0f) // Default font size
 {
     // Initialize font struct to zero
     memset(&m_font, 0, sizeof(m_font));
@@ -104,7 +85,7 @@ bool OverlayManager::Initialize()
     g_routineController.reset();
 
     // Initialize OpenGL first
-    if (!InitializeOpenGL())
+    if (!m_glContext.Initialize())
     {
         printf("Failed to initialize OpenGL\n");
         return false;
@@ -123,7 +104,7 @@ bool OverlayManager::Initialize()
         printf("Failed to create overlay with error: %s\n", vr::VROverlay()->GetOverlayErrorNameFromEnum(overlayError));
         return false;
     }
-    printf("Overlay created with handle: %llu\n", m_ulOverlayHandle);
+    printf("Overlay created with handle: %" PRIu64"\n", m_ulOverlayHandle);
 
     // Create the border overlay
     overlayError = vr::VROverlay()->CreateOverlay("peripheral_vision_border", "Peripheral Vision Border", &m_ulBorderOverlayHandle);
@@ -134,7 +115,7 @@ bool OverlayManager::Initialize()
         m_ulOverlayHandle = vr::k_ulOverlayHandleInvalid;
         return false;
     }
-    printf("Border overlay created with handle: %llu\n", m_ulBorderOverlayHandle);
+    printf("Border overlay created with handle: %" PRIu64"\n", m_ulBorderOverlayHandle);
 
     // Create the text overlay
     overlayError = vr::VROverlay()->CreateOverlay("peripheral_vision_text", "Peripheral Vision Text", &m_ulTextOverlayHandle);
@@ -147,7 +128,7 @@ bool OverlayManager::Initialize()
         m_ulBorderOverlayHandle = vr::k_ulOverlayHandleInvalid;
         return false;
     }
-    printf("Text overlay created with handle: %llu\n", m_ulTextOverlayHandle);
+    printf("Text overlay created with handle: %" PRIu64"\n", m_ulTextOverlayHandle);
 
     // Create the thumbnail overlay
     overlayError = vr::VROverlay()->CreateOverlay("peripheral_vision_target_thumb", "Peripheral Vision Target Thumbnail", &m_ulThumbnailHandle);
@@ -500,7 +481,8 @@ void OverlayManager::SetDisplayString(const char* text) {
     }
     
     // Make sure OpenGL context is current
-    wglMakeCurrent(m_hDC, m_hRC);
+    if (!m_glContext.MakeCurrent())
+        return;
     
     // Update text texture if it exists
     if (m_textTextureData && m_glTextTextureId != 0) {
@@ -529,7 +511,7 @@ void OverlayManager::SetDisplayString(const char* text) {
                         GL_RGBA, GL_UNSIGNED_BYTE, m_textTextureData);
         
         // Update the text overlay with the new texture
-        vr::Texture_t textTexture = {0};
+        vr::Texture_t textTexture = {};
         textTexture.handle = (void*)(uintptr_t)m_glTextTextureId;
         textTexture.eType = vr::TextureType_OpenGL;
         textTexture.eColorSpace = vr::ColorSpace_Auto;
@@ -552,7 +534,8 @@ void OverlayManager::SetDisplayStringWithGraph(const char* text, const std::vect
     }
     
     // Make sure OpenGL context is current - ONLY ONCE
-    wglMakeCurrent(m_hDC, m_hRC);
+    if (!m_glContext.MakeCurrent())
+        return;
     
     // Update text texture if it exists
     if (m_textTextureData && m_glTextTextureId != 0) {
@@ -596,7 +579,7 @@ void OverlayManager::SetDisplayStringWithGraph(const char* text, const std::vect
                         GL_RGBA, GL_UNSIGNED_BYTE, m_textTextureData);
         
         // Update the text overlay with the new texture
-        vr::Texture_t textTexture = {0};
+        vr::Texture_t textTexture = {};
         textTexture.handle = (void*)(uintptr_t)m_glTextTextureId;
         textTexture.eType = vr::TextureType_OpenGL;
         textTexture.eColorSpace = vr::ColorSpace_Auto;
@@ -606,84 +589,6 @@ void OverlayManager::SetDisplayStringWithGraph(const char* text, const std::vect
             printf("Set text overlay texture error: %s\n", vr::VROverlay()->GetOverlayErrorNameFromEnum(texError));
         }
     }
-}
-
-bool OverlayManager::InitializeOpenGL()
-{
-    // Create a dummy window for OpenGL context
-    WNDCLASS wc = {0};
-    wc.lpfnWndProc = DefWindowProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = "OVRDummyClass";
-    if (!RegisterClass(&wc))
-    {
-        printf("Failed to register window class\n");
-        return false;
-    }
-    m_hWnd = CreateWindow("OVRDummyClass", "Dummy OpenGL Window", 0, 0, 0, 1, 1, NULL, NULL, GetModuleHandle(NULL), NULL);
-    if (!m_hWnd)
-    {
-        printf("Failed to create dummy window\n");
-        return false;
-    }
-    m_hDC = GetDC(m_hWnd);
-    if (!m_hDC)
-    {
-        printf("Failed to get device context\n");
-        DestroyWindow(m_hWnd);
-        m_hWnd = NULL;
-        return false;
-    }
-    PIXELFORMATDESCRIPTOR pfd = {0};
-    pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
-    pfd.nVersion = 1;
-    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-    pfd.iPixelType = PFD_TYPE_RGBA;
-    pfd.cColorBits = 32;
-    pfd.cDepthBits = 24;
-    pfd.cStencilBits = 8;
-    int pixelFormat = ChoosePixelFormat(m_hDC, &pfd);
-    if (!pixelFormat)
-    {
-        printf("Failed to choose pixel format\n");
-        ReleaseDC(m_hWnd, m_hDC);
-        DestroyWindow(m_hWnd);
-        m_hDC = NULL;
-        m_hWnd = NULL;
-        return false;
-    }
-    if (!SetPixelFormat(m_hDC, pixelFormat, &pfd))
-    {
-        printf("Failed to set pixel format\n");
-        ReleaseDC(m_hWnd, m_hDC);
-        DestroyWindow(m_hWnd);
-        m_hDC = NULL;
-        m_hWnd = NULL;
-        return false;
-    }
-    m_hRC = wglCreateContext(m_hDC);
-    if (!m_hRC)
-    {
-        printf("Failed to create OpenGL rendering context\n");
-        ReleaseDC(m_hWnd, m_hDC);
-        DestroyWindow(m_hWnd);
-        m_hDC = NULL;
-        m_hWnd = NULL;
-        return false;
-    }
-    if (!wglMakeCurrent(m_hDC, m_hRC))
-    {
-        printf("Failed to make OpenGL context current\n");
-        wglDeleteContext(m_hRC);
-        ReleaseDC(m_hWnd, m_hDC);
-        DestroyWindow(m_hWnd);
-        m_hRC = NULL;
-        m_hDC = NULL;
-        m_hWnd = NULL;
-        return false;
-    }
-    printf("OpenGL initialized successfully\n");
-    return true;
 }
 
 void OverlayManager::Shutdown()
@@ -748,24 +653,6 @@ void OverlayManager::Shutdown()
     {
         delete[] m_textTextureData;
         m_textTextureData = nullptr;
-    }
-    
-    // Clean up OpenGL
-    if (m_hRC)
-    {
-        wglMakeCurrent(NULL, NULL);
-        wglDeleteContext(m_hRC);
-        m_hRC = NULL;
-    }
-    if (m_hDC && m_hWnd)
-    {
-        ReleaseDC(m_hWnd, m_hDC);
-        m_hDC = NULL;
-    }
-    if (m_hWnd)
-    {
-        DestroyWindow(m_hWnd);
-        m_hWnd = NULL;
     }
 }
 
@@ -924,7 +811,8 @@ void OverlayManager::UpdateOverlayTransform(const MU_Vector3& targetPosition)
 bool OverlayManager::CreateTargetTexture()
 {
     // Make sure OpenGL context is current
-    wglMakeCurrent(m_hDC, m_hRC);
+    if (!m_glContext.MakeCurrent())
+        return false;
 
     // Free existing texture data to prevent memory leaks
     if (m_pTextureData) {
@@ -1252,12 +1140,13 @@ bool OverlayManager::CreateTargetTexture()
 void OverlayManager::UpdateOverlayTexture()
 {
     // Make sure OpenGL context is current
-    wglMakeCurrent(m_hDC, m_hRC);
+    if (!m_glContext.MakeCurrent())
+        return;
     
     // Update target texture
     if (m_glTextureId != 0)
     {
-        vr::Texture_t targetTexture = {0};
+        vr::Texture_t targetTexture = {};
         targetTexture.handle = (void*)(uintptr_t)m_glTextureId;
         targetTexture.eType = vr::TextureType_OpenGL;
         targetTexture.eColorSpace = vr::ColorSpace_Auto;
@@ -1274,7 +1163,7 @@ void OverlayManager::UpdateOverlayTexture()
     // Update border texture
     if (m_glBorderTextureId != 0)
     {
-        vr::Texture_t borderTexture = {0};
+        vr::Texture_t borderTexture = {};
         borderTexture.handle = (void*)(uintptr_t)m_glBorderTextureId;
         borderTexture.eType = vr::TextureType_OpenGL;
         borderTexture.eColorSpace = vr::ColorSpace_Auto;
@@ -1288,7 +1177,7 @@ void OverlayManager::UpdateOverlayTexture()
     // Update text texture
     if (m_glTextTextureId != 0)
     {
-        vr::Texture_t textTexture = {0};
+        vr::Texture_t textTexture = {};
         textTexture.handle = (void*)(uintptr_t)m_glTextTextureId;
         textTexture.eType = vr::TextureType_OpenGL;
         textTexture.eColorSpace = vr::ColorSpace_Auto;
