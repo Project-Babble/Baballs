@@ -56,18 +56,18 @@ void HTTPServer::start() {
             throw std::runtime_error("Failed to create socket");
         }
 
-        struct sockaddr_in server_addr;
-        memset(&server_addr, 0, sizeof(server_addr));
+        struct sockaddr_in server_addr = {};
         server_addr.sin_family = AF_INET;
-        server_addr.sin_addr.s_addr = ip_address_to_uint("127.0.0.1");
+        server_addr.sin_addr.s_addr = INADDR_ANY;
         server_addr.sin_port = htons(port_);
 
         int opt = 1;
         setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
 
         if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+            std::string reason = strerror(errno);
             close_socket(server_socket);
-            throw std::runtime_error("Failed to bind socket");
+            throw std::runtime_error("Failed to bind socket: " + reason);
         }
 
         if (listen(server_socket, 10) < 0) {

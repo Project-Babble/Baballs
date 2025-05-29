@@ -2,10 +2,11 @@
 #ifndef FRAME_BUFFER_H
 #define FRAME_BUFFER_H
 
-#include <mutex>
-#include <thread>
 #include <atomic>
 #include <condition_variable>
+#include <cstdlib>
+#include <mutex>
+#include <thread>
 
 // Forward declaration - use the exact same struct name from jpeg_stream.h
 struct MJPEGStream;

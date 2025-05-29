@@ -383,9 +383,9 @@ STBIRDEF int stbir_resize_region(  const void *input_pixels , int input_w , int 
 #endif
 
 #ifdef STBIR_DEBUG
-#define STBIR__DEBUG_ASSERT STBIR_ASSERT
+#define STBIR__DEBUG_ASSERT(...) STBIR_ASSERT(__VA_ARGS__)
 #else
-#define STBIR__DEBUG_ASSERT
+#define STBIR__DEBUG_ASSERT(...) (void)(__VA_ARGS__)
 #endif
 
 // If you hit this it means I haven't done it yet.

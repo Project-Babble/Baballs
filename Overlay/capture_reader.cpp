@@ -263,7 +263,7 @@ bool AlignedFrame::DecodeImageLeft(std::vector<uint32_t>& rgb_buffer, int& width
         height = left_height;
         
         // Resize the output buffer if needed
-        if (rgb_buffer.size() != width * height) {
+        if (rgb_buffer.size() != static_cast<unsigned>(width * height)) {
             rgb_buffer.resize(width * height);
         }
         
@@ -296,7 +296,7 @@ bool AlignedFrame::DecodeImageRight(std::vector<uint32_t>& rgb_buffer, int& widt
         height = right_height;
         
         // Resize the output buffer if needed
-        if (rgb_buffer.size() != width * height) {
+        if (rgb_buffer.size() != static_cast<unsigned>(width * height)) {
             rgb_buffer.resize(width * height);
         }
         
