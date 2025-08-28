@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Configure script for Babble Gaze Eye Tracking
 # Supports macOS and Linux
