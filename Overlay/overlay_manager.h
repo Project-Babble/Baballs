@@ -2,7 +2,7 @@
 
 #include <openvr.h>
 #include <windows.h>
-#include <gl/GL.h>
+#include <GL/gl.h>
 #include <string>
 #include <map>
 #include "math_utils.h"
