@@ -5,3 +5,9 @@
 /Inference/__pycache__
 /Inference/dev
 /Inference/utils/__pycache__
+
+**/*.o
+Makefile
+
+.envrc
+.direnv/
